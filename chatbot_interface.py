@@ -18,13 +18,49 @@ def get_openai_client():
 def encode_image_to_base64(image_file):
     return base64.b64encode(image_file.getvalue()).decode('utf-8')
 
-def analyze_image_with_openai(image):
+def get_image_prompt_and_triggers(bot_type):
+    """Return specialized prompts and trigger words for each bot type"""
+    
+    bot_configs = {
+        "Plumbing and Water Systems": {
+            "prompt": "Please analyze this image of the plumbing system or water-related issue. Identify any visible problems, leaks, or maintenance concerns. Provide specific recommendations for repairs or maintenance.",
+            "triggers": ['leak', 'pipe', 'water', 'drain', 'faucet', 'toilet', 'sink', 'plumbing'],
+            "upload_message": "Please upload an image of the plumbing issue to help me better assist you."
+        },
+        "HVAC (Heating, Ventilation, and Air Conditioning)": {
+            "prompt": "Please analyze this image of the HVAC system or component. Identify any visible issues, maintenance needs, or potential problems. Provide specific recommendations for optimization or repairs.",
+            "triggers": ['ac', 'heat', 'ventilation', 'cooling', 'furnace', 'thermostat', 'filter', 'duct'],
+            "upload_message": "Please upload an image of your HVAC system or component to help me better assist you."
+        },
+        "Appliance Maintenance and Repairs": {
+            "prompt": "Please analyze this image of the appliance. Identify any visible issues, error indicators, or maintenance needs. Provide specific recommendations for repairs or maintenance.",
+            "triggers": ['washer', 'dryer', 'dishwasher', 'refrigerator', 'oven', 'microwave', 'appliance', 'machine'],
+            "upload_message": "Please upload an image of your appliance to help me better assist you."
+        },
+        "Pest and Bug Control": {
+            "prompt": "Please analyze this image and identify any pest or bug issues. Describe what you see and provide relevant recommendations for treatment or control.",
+            "triggers": ['bug', 'pest', 'insect', 'rodent', 'creature', 'ant', 'spider', 'mouse'],
+            "upload_message": "Please upload an image of the pest or bug to help me better assist you."
+        },
+        "Roofing, Gutter, and Exterior Maintenance": {
+            "prompt": "Please analyze this image of the roof, gutter, or exterior issue. Identify any visible damage, maintenance needs, or potential problems. Provide specific recommendations for repairs or maintenance.",
+            "triggers": ['roof', 'gutter', 'leak', 'shingle', 'exterior', 'siding', 'damage', 'crack'],
+            "upload_message": "Please upload an image of the exterior issue to help me better assist you."
+        }
+    }
+    
+    return bot_configs.get(bot_type, {
+        "prompt": "Please analyze this image and provide relevant recommendations.",
+        "triggers": ['issue', 'problem', 'help'],
+        "upload_message": "Please upload an image to help me better assist you."
+    })
+
+def analyze_image_with_openai(image, bot_type):
     client = get_openai_client()
     try:
-        # Convert the image to base64
         base64_image = encode_image_to_base64(image)
+        bot_config = get_image_prompt_and_triggers(bot_type)
         
-        # Create message with the image
         response = client.chat.completions.create(
             model="gpt-4o",
             messages=[
@@ -33,7 +69,7 @@ def analyze_image_with_openai(image):
                     "content": [
                         {
                             "type": "text",
-                            "text": "Please analyze this image and identify any pest or bug issues. Describe what you see and provide relevant recommendations for treatment or control."
+                            "text": bot_config["prompt"]
                         },
                         {
                             "type": "image_url",
@@ -47,7 +83,6 @@ def analyze_image_with_openai(image):
             max_tokens=500
         )
         
-        # Extract the response content
         return response.choices[0].message.content
     except Exception as e:
         return f"Error analyzing image: {str(e)}"
@@ -55,9 +90,12 @@ def analyze_image_with_openai(image):
 def chatbot_interface(bot_type):
     st.header(f"{bot_type} Chatbot")
 
-    # Initialize session state for image request flag if not exists
+    # Initialize session states
     if 'waiting_for_image' not in st.session_state:
         st.session_state.waiting_for_image = False
+    
+    # Get bot-specific configuration
+    bot_config = get_image_prompt_and_triggers(bot_type)
     
     # Initialize OpenAI client
     client = get_openai_client()
@@ -69,16 +107,16 @@ def chatbot_interface(bot_type):
 
     message_count = len(st.session_state.messages) // 2
 
-    # Check if we're waiting for an image upload
+    # Handle image upload state
     if st.session_state.waiting_for_image:
-        st.info("Please upload an image of the bug or pest to help me better assist you.")
+        st.info(bot_config["upload_message"])
         uploaded_image = st.file_uploader("Upload image", type=["jpg", "jpeg", "png"])
         
         if uploaded_image:
             st.image(uploaded_image, caption="Uploaded Image", use_column_width=True)
             
             with st.spinner("Analyzing the image..."):
-                analysis_result = analyze_image_with_openai(uploaded_image)
+                analysis_result = analyze_image_with_openai(uploaded_image, bot_type)
                 
                 # Add the analysis to the chat
                 st.chat_message("assistant").markdown(analysis_result)
@@ -97,9 +135,9 @@ def chatbot_interface(bot_type):
             st.session_state.messages.append({"role": "user", "content": prompt})
 
             with st.spinner(f"The {bot_type} is thinking..."):
-                # For pest control related queries, trigger image upload
-                if any(word in prompt.lower() for word in ['bug', 'pest', 'insect', 'rodent', 'creature']):
-                    response = "To better assist you, could you please provide a picture of the bug or pest you're dealing with? This will help me identify the species and provide more specific advice for control and treatment."
+                # Check if any trigger words are in the prompt
+                if any(word in prompt.lower() for word in bot_config["triggers"]):
+                    response = f"To better assist you with this {bot_type.lower()} issue, could you please provide a picture? This will help me provide more specific advice."
                     st.session_state.waiting_for_image = True
                 else:
                     response = chat_with_gpt(client, prompt, st.session_state.messages, bot_type=bot_type)
